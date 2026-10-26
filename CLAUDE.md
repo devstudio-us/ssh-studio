@@ -32,7 +32,10 @@ Angular uses standalone components (no NgModules); providers live in [src/app/ap
 - Config: TOML files in the OS config dir (hosts.toml, snippets.toml)
 - Secrets: OS keychain via the `keyring` crate. Never store passwords or keys in config files.
 
-(Note: `russh`, `russh-sftp`, and `keyring` are not yet in [src-tauri/Cargo.toml](src-tauri/Cargo.toml); the code is still the Tauri scaffold. Add them as the SSH features land.)
+(Note: `russh` + `tokio` are in [src-tauri/Cargo.toml](src-tauri/Cargo.toml) and drive SSH in [src-tauri/src/ssh.rs](src-tauri/src/ssh.rs). `russh-sftp` and `keyring` are not added yet — they land with SFTP and secret storage.)
+
+## SSH session model
+[ssh.rs](src-tauri/src/ssh.rs) opens an interactive shell per session, keyed by a generated session id in a `SessionManager` (Tauri-managed state). Flow: `connect` authenticates (key or password; `password` doubles as the key passphrase), opens a PTY+shell, and stores the session **Pending** (channel open but unread). The frontend subscribes to the session's events, then calls `attach`, which spawns the reader task and flips it to **Running** — this two-step avoids losing the initial shell banner. Output streams to the frontend as `pty-output-<id>` events (byte arrays); `pty-closed-<id>` fires on exit. `write_pty` / `resize_pty` / `disconnect` drive the live session. Host keys are trust-on-first-use in `known_hosts.toml` (keyed by `host:port`), refused on mismatch. The terminal UI is [terminal.component.ts](src/app/terminal.component.ts) (xterm.js + fit addon).
 
 ## Rules
 - Keep the Rust layer thin: only networking, filesystem, PTY, keychain. All product logic in Angular.
@@ -52,5 +55,5 @@ Later: .ssh/config import, Docker/systemd panels, session logging
 
 ## Status
 - [x] M1 step 1: hosts store + UI
-- [ ] M1 step 2: SSH connect + terminal
+- [x] M1 step 2: SSH connect + terminal
 - [ ] M1 step 3: dashboard metrics
