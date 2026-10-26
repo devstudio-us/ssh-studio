@@ -37,6 +37,11 @@ Angular uses standalone components (no NgModules); providers live in [src/app/ap
 ## SSH session model
 [ssh.rs](src-tauri/src/ssh.rs) opens an interactive shell per session, keyed by a generated session id in a `SessionManager` (Tauri-managed state). Flow: `connect` authenticates (key or password; `password` doubles as the key passphrase), opens a PTY+shell, and stores the session **Pending** (channel open but unread). The frontend subscribes to the session's events, then calls `attach`, which spawns the reader task and flips it to **Running** — this two-step avoids losing the initial shell banner. Output streams to the frontend as `pty-output-<id>` events (byte arrays); `pty-closed-<id>` fires on exit. `write_pty` / `resize_pty` / `disconnect` drive the live session. Host keys are trust-on-first-use in `known_hosts.toml` (keyed by `host:port`), refused on mismatch. The terminal UI is [terminal.component.ts](src/app/terminal.component.ts) (xterm.js + fit addon).
 
+`connect` caches the working secret per host in `SessionManager.secrets` (memory only, never disk/logs); this both marks a host "connected this session" and lets the metrics poller reconnect. The shared auth path is `ssh::open_authenticated`, used by both `connect` (adds a shell) and the metrics poller (adds exec channels).
+
+## Dashboard metrics
+[metrics.rs](src-tauri/src/metrics.rs): `start_metrics(host_id)` / `stop_metrics(host_id)`. A host is eligible only if it has a cached secret (connected this session). The poller opens its own SSH handle and runs one marked shell command (`METRICS_COMMAND`) every 5s, collecting CPU (two `/proc/stat` samples), memory, disk for `/`, load, and uptime, parsed leniently into `HostMetrics` and emitted as `metrics-<host_id>`. Missing tools (no `/proc`/`free`, e.g. FreeBSD) leave fields `null` → "n/a" in the UI rather than failing. The poller reconnects on transient errors and is stopped by dropping its stop-sender. UI: [dashboard.component.ts](src/app/dashboard.component.ts) + [metrics-card.component.ts](src/app/metrics-card.component.ts); metrics run while a card is mounted and on app exit the process ends. Note the two views are kept mounted (display-toggled) so terminals and pollers survive switching tabs.
+
 ## Rules
 - Keep the Rust layer thin: only networking, filesystem, PTY, keychain. All product logic in Angular.
 - Expose Tauri commands explicitly; grant them in src-tauri/capabilities. No wildcard permissions.
@@ -56,4 +61,4 @@ Later: .ssh/config import, Docker/systemd panels, session logging
 ## Status
 - [x] M1 step 1: hosts store + UI
 - [x] M1 step 2: SSH connect + terminal
-- [ ] M1 step 3: dashboard metrics
+- [x] M1 step 3: dashboard metrics
